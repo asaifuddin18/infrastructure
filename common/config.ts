@@ -24,6 +24,11 @@ export interface EnvironmentConfig {
   readonly createGithubOidcProvider: boolean;
   /** Create the Vercel OIDC provider, or import the one the account already has. */
   readonly createVercelOidcProvider: boolean;
+  /**
+   * Public base URL of the deployed dashboard. The daily schedule is only created once
+   * this is known, since it posts to the app's cron endpoint.
+   */
+  readonly appUrl: string | null;
 }
 
 const SHARED = {
@@ -45,9 +50,15 @@ const SHARED = {
   createVercelOidcProvider: false,
 } as const;
 
+// Set once the Vercel project exists; until then the daily schedule is not created.
+const APP_URLS: Record<EnvironmentName, string | null> = {
+  dev: null,
+  prod: null,
+};
+
 const CONFIGS: Record<EnvironmentName, EnvironmentConfig> = {
-  dev: { name: 'dev', ...SHARED },
-  prod: { name: 'prod', ...SHARED },
+  dev: { name: 'dev', ...SHARED, appUrl: APP_URLS.dev },
+  prod: { name: 'prod', ...SHARED, appUrl: APP_URLS.prod },
 };
 
 /**

@@ -56,6 +56,13 @@ To point this at a different account, edit `SHARED` in `common/config.ts`.
 | `common-account` | Account-wide, **not** per-env | Vercel + GitHub OIDC providers, CDK deploy role |
 | `dashboard-data-<env>` | Per env | Auth table, data table, KMS key, SnapTrade secret |
 | `dashboard-vercel-oidc-<env>` | Per env | IAM roles for Vercel deployments |
+| `dashboard-snapshot-schedule-<env>` | Per env | Daily 5pm PT schedule invoking the app's snapshot endpoint |
+
+The schedule stack is only created once `appUrl` is set in `common/config.ts`. It uses
+an EventBridge API destination rather than a Lambda so the fetching and ranking logic
+lives in exactly one place — the application repository, where it is tested — instead
+of being duplicated across repos. The shared secret reaches the connection as a
+CloudFormation dynamic reference and is never written into a template.
 
 `common-account` deliberately has no environment suffix. OIDC providers are global per
 issuer URL, so a per-environment copy would fail on the second deploy with "provider

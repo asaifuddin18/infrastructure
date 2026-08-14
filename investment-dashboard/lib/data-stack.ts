@@ -18,6 +18,7 @@ export class DataStack extends Stack {
   public readonly dataTable: dynamodb.Table;
   public readonly userSecretKey: kms.Key;
   public readonly snaptradeCredentials: secretsmanager.Secret;
+  public readonly cronSecret: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -61,6 +62,14 @@ export class DataStack extends Stack {
       removalPolicy,
     });
 
+    this.cronSecret = new secretsmanager.Secret(this, 'CronSecret', {
+      secretName: `dashboard/cron-secret/${config.name}`,
+      description: 'Shared secret required by the dashboard snapshot endpoint',
+      removalPolicy,
+      generateSecretString: { excludePunctuation: true, passwordLength: 48 },
+    });
+
+    new CfnOutput(this, 'CronSecretArn', { value: this.cronSecret.secretArn });
     new CfnOutput(this, 'AuthTableName', { value: this.authTable.tableName });
     new CfnOutput(this, 'DataTableName', { value: this.dataTable.tableName });
     new CfnOutput(this, 'UserSecretKeyArn', { value: this.userSecretKey.keyArn });

@@ -4,6 +4,7 @@ import { EnvironmentName, loadConfig, stackName } from '../common/config';
 import { SharedAccountStack } from '../common/lib/shared-account-stack';
 import { DataStack } from '../investment-dashboard/lib/data-stack';
 import { VercelOidcStack } from '../investment-dashboard/lib/vercel-oidc-stack';
+import { SnapshotScheduleStack } from '../investment-dashboard/lib/snapshot-schedule-stack';
 
 const app = new cdk.App();
 
@@ -37,12 +38,22 @@ const vercelOidc = new VercelOidcStack(app, stackName('dashboard', 'vercel-oidc'
   description: 'IAM roles assumed by Vercel deployments via OIDC federation',
 });
 
+const scheduleStack = config.appUrl
+  ? new SnapshotScheduleStack(app, stackName('dashboard', 'snapshot-schedule', envName), {
+      env,
+      config,
+      data,
+      appUrl: config.appUrl,
+      description: 'Daily schedule invoking the dashboard snapshot endpoint',
+    })
+  : undefined;
+
 cdk.Tags.of(app).add('ManagedBy', 'cdk');
 
 cdk.Tags.of(shared).add('Project', 'shared');
 cdk.Tags.of(shared).add('Environment', 'shared');
 
-for (const stack of [data, vercelOidc]) {
+for (const stack of [data, vercelOidc, scheduleStack].filter((s) => s !== undefined)) {
   cdk.Tags.of(stack).add('Project', 'investment-dashboard');
   cdk.Tags.of(stack).add('Environment', envName);
 }
