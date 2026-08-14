@@ -18,6 +18,8 @@ export interface EnvironmentConfig {
   readonly githubOwner: string;
   /** Infrastructure repository name, used to scope the deploy role trust policy. */
   readonly githubRepo: string;
+  /** Subject-claim prefixes GitHub may issue for this repository. */
+  readonly githubSubjectPrefixes: readonly string[];
   /** Create the GitHub OIDC provider, or import the one the account already has. */
   readonly createGithubOidcProvider: boolean;
   /** Create the Vercel OIDC provider, or import the one the account already has. */
@@ -31,6 +33,13 @@ const SHARED = {
   vercelProjectName: 'investment-dashboard',
   githubOwner: 'asaifuddin18',
   githubRepo: 'infrastructure',
+  // GitHub issues immutable subject claims carrying numeric owner and repo ids for
+  // newer repositories, while older ones still use the plain name form. Both are
+  // matched exactly so the role keeps working whichever this repository emits.
+  githubSubjectPrefixes: [
+    'repo:asaifuddin18/infrastructure',
+    'repo:asaifuddin18@42976135/infrastructure@1332660767',
+  ],
   // Both providers already exist in this account, created by earlier projects.
   createGithubOidcProvider: false,
   createVercelOidcProvider: false,

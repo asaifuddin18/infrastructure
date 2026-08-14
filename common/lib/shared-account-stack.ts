@@ -103,11 +103,11 @@ export class SharedAccountStack extends Stack {
           [`${GITHUB_OIDC_HOST}:aud`]: 'sts.amazonaws.com',
         },
         StringLike: {
-          [`${GITHUB_OIDC_HOST}:sub`]: [
-            `repo:${repo}:ref:refs/heads/main`,
-            `repo:${repo}:pull_request`,
-            `repo:${repo}:environment:*`,
-          ],
+          [`${GITHUB_OIDC_HOST}:sub`]: config.githubSubjectPrefixes.flatMap((prefix) => [
+            `${prefix}:ref:refs/heads/main`,
+            `${prefix}:pull_request`,
+            `${prefix}:environment:*`,
+          ]),
         },
       }),
     });
