@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import 'dotenv/config';
 import * as cdk from 'aws-cdk-lib';
 import { EnvironmentName, loadConfig, stackName } from '../common/config';
 import { SharedAccountStack } from '../common/lib/shared-account-stack';
