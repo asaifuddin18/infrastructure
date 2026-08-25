@@ -58,6 +58,12 @@ export class ArenaComputeStack extends Stack {
     const { config, data } = props;
     const parameterName = riotApiKeyParameterName(config.name);
 
+    /**
+     * Whether the worker can be throttled, and therefore whether it is allowed to run.
+     * These two are deliberately the same condition — see `reserveArenaWorkerConcurrency`.
+     */
+    const throttled = config.reserveArenaWorkerConcurrency;
+
     const deadLetterQueue = new sqs.Queue(this, 'MatchFetchDlq', {
       queueName: `arena-match-fetch-dlq-${config.name}`,
       retentionPeriod: Duration.days(14),
@@ -131,8 +137,12 @@ export class ArenaComputeStack extends Stack {
        * headers, is the simplest correct answer at this throughput. Raising this is only
        * safe alongside a distributed token bucket, and only worth it with a production
        * key that has a meaningfully higher ceiling.
+       *
+       * Omitted entirely when the account's concurrency quota cannot support a
+       * reservation; see `reserveArenaWorkerConcurrency`. The event source below is
+       * disabled in that case, so the worker is stopped rather than unthrottled.
        */
-      reservedConcurrentExecutions: 1,
+      ...(throttled ? { reservedConcurrentExecutions: 1 } : {}),
       layers: [parametersExtension],
       environment: {
         ...sharedEnvironment,
@@ -152,6 +162,9 @@ export class ArenaComputeStack extends Stack {
         // Without this a single poison match forces SQS to redeliver the whole batch, and
         // every already-persisted match in it is reprocessed.
         reportBatchItemFailures: true,
+        // Held closed while the worker cannot be throttled. Enqueued matches wait in the
+        // queue — they are not lost — and start draining the moment this is enabled.
+        enabled: throttled,
       }),
     );
 

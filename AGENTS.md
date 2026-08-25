@@ -95,6 +95,27 @@ worker's `reservedConcurrentExecutions: 1`, which is the only thing keeping a sh
 Riot API key inside its rate limit, and the queue's visibility timeout at six times the
 worker timeout. `lol-arena-analyzer/test/` asserts both.
 
+### The worker is currently stopped
+
+`reserveArenaWorkerConcurrency` in `common/config.ts` is `false`, so the worker has no
+reservation **and** its event source is disabled. Both hang off that one flag on purpose.
+
+A reservation requires the account's Lambda "Concurrent executions" quota to exceed 10,
+because AWS will not let unreserved concurrency fall below that floor. This account is
+still at the new-account value of exactly 10, which makes any reservation arithmetically
+impossible — the deploy fails with `InvalidRequest` rather than degrading. An increase to
+1000 was requested on 2026-08-25.
+
+Deploying the worker unreserved but *live* would be the dangerous outcome: SQS would
+scale it out against a shared, rate-limited key. Stopping it instead means enqueued
+matches simply wait. Once the quota is granted:
+
+```bash
+aws service-quotas get-service-quota --service-code lambda --quota-code L-B99A9384
+```
+
+Flip the flag to `true` and merge; the worker starts draining, throttled.
+
 The Riot API key is an SSM `SecureString` rather than a Secrets Manager secret, unlike
 the dashboard's credentials. A development key expires every 24 hours, so it is rotated
 daily and Parameter Store is free where Secrets Manager bills per secret per month.

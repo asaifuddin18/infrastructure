@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { loadConfig, EnvironmentName } from '../../common/config';
+import { loadConfig, EnvironmentConfig, EnvironmentName } from '../../common/config';
 import { ArenaDataStack } from '../lib/data-stack';
 import { ArenaComputeStack } from '../lib/compute-stack';
 
@@ -21,14 +21,15 @@ interface SynthResult {
  * runtime of this suite. The templates are immutable once produced, so each environment
  * is built once and shared.
  */
-const cache = new Map<EnvironmentName, SynthResult>();
+const cache = new Map<string, SynthResult>();
 
-function synth(env: EnvironmentName): SynthResult {
-  const cached = cache.get(env);
+function synth(env: EnvironmentName, overrides: Partial<EnvironmentConfig> = {}): SynthResult {
+  const key = `${env}:${JSON.stringify(overrides)}`;
+  const cached = cache.get(key);
   if (cached) return cached;
 
   const app = new cdk.App();
-  const config = loadConfig(env);
+  const config = { ...loadConfig(env), ...overrides };
   const stackEnv = { account: config.account, region: config.region };
 
   const data = new ArenaDataStack(app, `arena-data-${env}`, { env: stackEnv, config });
@@ -42,9 +43,13 @@ function synth(env: EnvironmentName): SynthResult {
     data: Template.fromStack(data),
     compute: Template.fromStack(compute),
   };
-  cache.set(env, result);
+  cache.set(key, result);
   return result;
 }
+
+/** The account quota currently forbids a reservation, so both branches are pinned here. */
+const THROTTLED: Partial<EnvironmentConfig> = { reserveArenaWorkerConcurrency: true };
+const UNTHROTTLED: Partial<EnvironmentConfig> = { reserveArenaWorkerConcurrency: false };
 
 describe('ArenaDataStack', () => {
   it('retains the table and the archive in production', () => {
@@ -98,17 +103,36 @@ describe('ArenaDataStack', () => {
 });
 
 describe('ArenaComputeStack', () => {
-  it('pins the match worker to a single concurrent execution', () => {
+  it('pins the match worker to a single concurrent execution when it may reserve', () => {
     // The throttle. A Riot API key is one global token bucket shared by every caller, so
     // letting SQS fan out spends the whole budget instantly and earns only 429s.
-    synth('prod').compute.hasResourceProperties('AWS::Lambda::Function', {
+    const { compute } = synth('prod', THROTTLED);
+
+    compute.hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'arena-match-worker-prod',
       ReservedConcurrentExecutions: 1,
     });
+    compute.hasResourceProperties('AWS::Lambda::EventSourceMapping', { Enabled: true });
+  });
+
+  it('stops the worker rather than running it unthrottled', () => {
+    // An account whose Lambda concurrency quota is 10 cannot reserve anything at all.
+    // Deploying the worker anyway with the queue live would let SQS scale it out against
+    // a shared, rate-limited key, so the event source is held closed instead. Enqueued
+    // matches wait; they are not lost.
+    const { compute } = synth('prod', UNTHROTTLED);
+
+    const workers = compute.findResources('AWS::Lambda::Function', {
+      Properties: { FunctionName: 'arena-match-worker-prod' },
+    });
+    const [worker] = Object.values(workers);
+    expect(worker.Properties.ReservedConcurrentExecutions).toBeUndefined();
+
+    compute.hasResourceProperties('AWS::Lambda::EventSourceMapping', { Enabled: false });
   });
 
   it('does not cap concurrency on the starter, which makes no expensive calls', () => {
-    const { compute } = synth('prod');
+    const { compute } = synth('prod', THROTTLED);
 
     const starters = compute.findResources('AWS::Lambda::Function', {
       Properties: { FunctionName: 'arena-ingest-starter-prod' },
@@ -118,7 +142,7 @@ describe('ArenaComputeStack', () => {
   });
 
   it('sends repeatedly failing matches to a dead letter queue', () => {
-    synth('prod').compute.hasResourceProperties('AWS::SQS::Queue', {
+    synth('prod', THROTTLED).compute.hasResourceProperties('AWS::SQS::Queue', {
       QueueName: 'arena-match-fetch-prod',
       RedrivePolicy: Match.objectLike({ maxReceiveCount: 3 }),
     });
@@ -127,7 +151,7 @@ describe('ArenaComputeStack', () => {
   it('gives the queue a visibility timeout six times the worker timeout', () => {
     // Too short and SQS redelivers a message the worker is still processing, producing
     // duplicate work against a rate-limited API.
-    const { compute } = synth('prod');
+    const { compute } = synth('prod', THROTTLED);
 
     compute.hasResourceProperties('AWS::SQS::Queue', {
       QueueName: 'arena-match-fetch-prod',
@@ -141,14 +165,14 @@ describe('ArenaComputeStack', () => {
 
   it('reports partial batch failures', () => {
     // Without this one poison match forces redelivery of its entire batch.
-    synth('prod').compute.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+    synth('prod', THROTTLED).compute.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
       FunctionResponseTypes: ['ReportBatchItemFailures'],
       BatchSize: 5,
     });
   });
 
   it('runs both functions on ARM64', () => {
-    const { compute } = synth('prod');
+    const { compute } = synth('prod', THROTTLED);
     const functions = compute.findResources('AWS::Lambda::Function');
 
     expect(Object.keys(functions)).toHaveLength(2);
@@ -159,7 +183,7 @@ describe('ArenaComputeStack', () => {
 
   it('sets an explicit log retention on every log group', () => {
     // The CDK default is to never expire, which is where side-project AWS bills come from.
-    const { compute } = synth('prod');
+    const { compute } = synth('prod', THROTTLED);
     const groups = compute.findResources('AWS::Logs::LogGroup');
 
     expect(Object.keys(groups)).toHaveLength(2);
@@ -171,7 +195,7 @@ describe('ArenaComputeStack', () => {
   it('never puts the Riot API key in an environment variable', () => {
     // Development keys expire daily; the functions read the key from SSM at runtime so a
     // rotation is a CLI call rather than a redeploy.
-    const { compute } = synth('prod');
+    const { compute } = synth('prod', THROTTLED);
 
     for (const fn of Object.values(compute.findResources('AWS::Lambda::Function'))) {
       const variables: Record<string, unknown> = fn.Properties.Environment?.Variables ?? {};
@@ -184,7 +208,7 @@ describe('ArenaComputeStack', () => {
   });
 
   it('scopes parameter read access to the arena key alone', () => {
-    synth('prod').compute.hasResourceProperties('AWS::IAM::Policy', {
+    synth('prod', THROTTLED).compute.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: Match.objectLike({
         Statement: Match.arrayWith([
           Match.objectLike({
@@ -197,7 +221,7 @@ describe('ArenaComputeStack', () => {
   });
 
   it('alarms as soon as anything lands in the dead letter queue', () => {
-    synth('prod').compute.hasResourceProperties('AWS::CloudWatch::Alarm', {
+    synth('prod', THROTTLED).compute.hasResourceProperties('AWS::CloudWatch::Alarm', {
       AlarmName: 'arena-match-fetch-dlq-prod',
       Threshold: 0,
       ComparisonOperator: 'GreaterThanThreshold',
@@ -207,7 +231,7 @@ describe('ArenaComputeStack', () => {
 
   it('keeps the data stores out of the compute stack entirely', () => {
     // A bad compute deploy must never be able to take the corpus with it.
-    const { compute } = synth('prod');
+    const { compute } = synth('prod', THROTTLED);
 
     expect(Object.keys(compute.findResources('AWS::DynamoDB::Table'))).toHaveLength(0);
     expect(Object.keys(compute.findResources('AWS::S3::Bucket'))).toHaveLength(0);
