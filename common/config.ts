@@ -25,6 +25,27 @@ export interface EnvironmentConfig {
   /** Create the Vercel OIDC provider, or import the one the account already has. */
   readonly createVercelOidcProvider: boolean;
   /**
+   * Whether the Arena match worker may reserve concurrency, and therefore whether it is
+   * allowed to consume its queue at all.
+   *
+   * Reserving requires the account's Lambda "Concurrent executions" quota to be above 10.
+   * AWS refuses to let unreserved concurrency fall below that floor, so at a quota of
+   * exactly 10 — where a new account starts — reserving any amount is arithmetically
+   * impossible and the deploy fails outright.
+   *
+   * That reservation is the only thing keeping a shared Riot API key inside its rate
+   * limit, because the key is a single global token bucket rather than a per-caller one.
+   * So while this is false the worker's event source is disabled too: the queue still
+   * accepts work and nothing drains it. That pairing is deliberate — an unthrottled
+   * worker is worse than a stopped one, and tying both to one flag means ingestion cannot
+   * start unthrottled by accident.
+   *
+   * Check the quota before turning this on:
+   *
+   *   aws service-quotas get-service-quota --service-code lambda --quota-code L-B99A9384
+   */
+  readonly reserveArenaWorkerConcurrency: boolean;
+  /**
    * Public base URL of the deployed dashboard. The daily schedule is only created once
    * this is known, since it posts to the app's cron endpoint.
    */
@@ -48,6 +69,10 @@ const SHARED = {
   // Both providers already exist in this account, created by earlier projects.
   createGithubOidcProvider: false,
   createVercelOidcProvider: false,
+  // This account's Lambda concurrency quota is still the new-account value of 10, which
+  // makes any reservation impossible. An increase to 1000 was requested on 2026-08-25;
+  // turn this on once it is granted, and the worker starts draining its queue throttled.
+  reserveArenaWorkerConcurrency: false,
 } as const;
 
 // Set once the Vercel project exists; until then the daily schedule is not created.
