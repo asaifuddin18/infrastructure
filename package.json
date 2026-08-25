@@ -12,15 +12,22 @@
     "synth": "cdk synth",
     "diff": "cdk diff",
     "deploy": "cdk deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.10.1",
     "aws-cdk": "2.1136.0",
+    "esbuild": "^0.28.2",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@asaifuddin18/arena-ingest-starter": "^0.1.0",
+    "@asaifuddin18/arena-match-worker": "^0.1.0",
     "aws-cdk-lib": "2.264.0",
     "constructs": "^10.8.1"
   }

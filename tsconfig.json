@@ -21,6 +21,11 @@
     "skipLibCheck": true,
     "typeRoots": ["./node_modules/@types"]
   },
-  "include": ["bin/**/*.ts", "common/**/*.ts", "investment-dashboard/**/*.ts"],
+  "include": [
+    "bin/**/*.ts",
+    "common/**/*.ts",
+    "investment-dashboard/**/*.ts",
+    "lol-arena-analyzer/**/*.ts"
+  ],
   "exclude": ["node_modules", "cdk.out", "**/*.d.ts"]
 }
