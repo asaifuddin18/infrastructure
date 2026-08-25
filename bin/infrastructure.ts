@@ -5,6 +5,8 @@ import { SharedAccountStack } from '../common/lib/shared-account-stack';
 import { DataStack } from '../investment-dashboard/lib/data-stack';
 import { VercelOidcStack } from '../investment-dashboard/lib/vercel-oidc-stack';
 import { SnapshotScheduleStack } from '../investment-dashboard/lib/snapshot-schedule-stack';
+import { ArenaDataStack } from '../lol-arena-analyzer/lib/data-stack';
+import { ArenaComputeStack } from '../lol-arena-analyzer/lib/compute-stack';
 
 const app = new cdk.App();
 
@@ -48,6 +50,19 @@ const scheduleStack = config.appUrl
     })
   : undefined;
 
+const arenaData = new ArenaDataStack(app, stackName('arena', 'data', envName), {
+  env,
+  config,
+  description: 'Arena analyser persistence: single table and the raw match archive',
+});
+
+const arenaCompute = new ArenaComputeStack(app, stackName('arena', 'compute', envName), {
+  env,
+  config,
+  data: arenaData,
+  description: 'Arena match ingestion: queue, starter and rate-limited worker',
+});
+
 cdk.Tags.of(app).add('ManagedBy', 'cdk');
 
 cdk.Tags.of(shared).add('Project', 'shared');
@@ -55,5 +70,10 @@ cdk.Tags.of(shared).add('Environment', 'shared');
 
 for (const stack of [data, vercelOidc, scheduleStack].filter((s) => s !== undefined)) {
   cdk.Tags.of(stack).add('Project', 'investment-dashboard');
+  cdk.Tags.of(stack).add('Environment', envName);
+}
+
+for (const stack of [arenaData, arenaCompute]) {
+  cdk.Tags.of(stack).add('Project', 'lol-arena-analyzer');
   cdk.Tags.of(stack).add('Environment', envName);
 }

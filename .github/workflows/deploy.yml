@@ -22,6 +22,11 @@ permissions:
   id-token: write
   contents: read
   pull-requests: write
+  # The Arena Lambda code arrives as packages from GitHub Packages, whose npm registry
+  # requires authentication for every read, public packages included. Each package must
+  # also grant this repository access under its "Manage Actions access" settings for the
+  # built-in token to be accepted.
+  packages: read
 
 env:
   AWS_REGION: us-east-1
@@ -39,8 +44,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@asaifuddin18'
 
       - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: npm test
 
       - run: npm run typecheck
 
@@ -81,8 +92,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@asaifuddin18'
 
       - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: npm test
 
       - run: npm run typecheck
 

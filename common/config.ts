@@ -77,3 +77,21 @@ export function loadConfig(name: EnvironmentName): EnvironmentConfig {
 export function stackName(project: string, stack: string, env: EnvironmentName): string {
   return `${project}-${stack}-${env}`;
 }
+
+/**
+ * SSM parameter holding the Riot API key for an environment.
+ *
+ * Deliberately not a Secrets Manager secret, unlike the dashboard's credentials in this
+ * same repository. A Riot development key expires every 24 hours, so this is rotated
+ * daily; Parameter Store SecureStrings are free where Secrets Manager bills per secret
+ * per month, and the rotation is a one-line CLI call either way.
+ *
+ * CloudFormation cannot create a SecureString with a value, so the parameter itself is
+ * created out of band and the stacks only grant read on this name:
+ *
+ *   aws ssm put-parameter --name /arena/riot-api-key/prod \
+ *     --type SecureString --value RGAPI-... --overwrite
+ */
+export function riotApiKeyParameterName(env: EnvironmentName): string {
+  return `/arena/riot-api-key/${env}`;
+}
