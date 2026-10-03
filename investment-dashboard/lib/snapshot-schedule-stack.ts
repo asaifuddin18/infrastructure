@@ -1,7 +1,8 @@
-import { Stack, StackProps, CfnOutput, Duration } from 'aws-cdk-lib';
+import { Stack, StackProps, CfnOutput, Duration, TimeZone } from 'aws-cdk-lib';
 import * as events from 'aws-cdk-lib/aws-events';
-import * as iam from 'aws-cdk-lib/aws-iam';
+import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
+import * as schedulerTargets from 'aws-cdk-lib/aws-scheduler-targets';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../common/config';
@@ -14,10 +15,20 @@ export interface SnapshotScheduleStackProps extends StackProps {
   readonly appUrl: string;
 }
 
+/** Source and detail type of the event the schedule emits and the rule forwards. */
+const EVENT_SOURCE = 'investment-dashboard.scheduler';
+const EVENT_DETAIL_TYPE = 'DailySnapshotDue';
+
 /**
  * Invokes the dashboard's snapshot endpoint every weekday after after-hours trading
- * closes. An API destination is used rather than a Lambda so the fetching and ranking
- * logic lives in exactly one place, in the application repository where it is tested.
+ * closes, without a Lambda, so the fetching and ranking logic lives in exactly one
+ * place: the application repository, where it is tested.
+ *
+ * It takes two hops because neither service does both jobs. EventBridge Scheduler
+ * understands time zones but cannot target an API destination; an EventBridge rule can
+ * target an API destination but only schedules in UTC, which would drift an hour across
+ * every daylight saving change. So the schedule puts an event on a dedicated bus, and a
+ * rule on that bus forwards it to the endpoint.
  */
 export class SnapshotScheduleStack extends Stack {
   constructor(scope: Construct, id: string, props: SnapshotScheduleStackProps) {
@@ -25,62 +36,66 @@ export class SnapshotScheduleStack extends Stack {
 
     const { config, data, appUrl } = props;
 
-    const connection = new events.CfnConnection(this, 'SnapshotConnection', {
-      name: `dashboard-snapshot-${config.name}`,
-      authorizationType: 'API_KEY',
-      description: 'Shared secret header for the dashboard snapshot endpoint',
-      authParameters: {
-        apiKeyAuthParameters: {
-          apiKeyName: 'x-cron-secret',
-          apiKeyValue: data.cronSecret.secretValue.unsafeUnwrap(),
-        },
-      },
-    });
-
-    const destination = new events.CfnApiDestination(this, 'SnapshotDestination', {
-      name: `dashboard-snapshot-${config.name}`,
-      connectionArn: connection.attrArn,
-      httpMethod: 'POST',
-      invocationEndpoint: `${appUrl}/api/cron/snapshot`,
-      invocationRateLimitPerSecond: 1,
-    });
-
     const deadLetterQueue = new sqs.Queue(this, 'SnapshotDlq', {
       queueName: `dashboard-snapshot-dlq-${config.name}`,
       retentionPeriod: Duration.days(14),
       enforceSSL: true,
     });
 
-    const role = new iam.Role(this, 'SnapshotSchedulerRole', {
-      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
-      description: 'Lets EventBridge Scheduler invoke the dashboard snapshot endpoint',
+    const bus = new events.EventBus(this, 'SnapshotBus', {
+      eventBusName: `dashboard-snapshot-${config.name}`,
     });
-    role.addToPolicy(
-      new iam.PolicyStatement({
-        actions: ['events:InvokeApiDestination'],
-        resources: [destination.attrArn],
-      }),
-    );
-    deadLetterQueue.grantSendMessages(role);
 
-    const schedule = new scheduler.CfnSchedule(this, 'SnapshotSchedule', {
-      name: `dashboard-snapshot-${config.name}`,
+    const connection = new events.Connection(this, 'SnapshotConnection', {
+      connectionName: `dashboard-snapshot-${config.name}`,
+      description: 'Shared secret header for the dashboard snapshot endpoint',
+      authorization: events.Authorization.apiKey('x-cron-secret', data.cronSecret.secretValue),
+    });
+
+    const destination = new events.ApiDestination(this, 'SnapshotDestination', {
+      apiDestinationName: `dashboard-snapshot-${config.name}`,
+      connection,
+      endpoint: `${appUrl}/api/cron/snapshot`,
+      httpMethod: events.HttpMethod.POST,
+      rateLimitPerSecond: 1,
+    });
+
+    new events.Rule(this, 'SnapshotRule', {
+      ruleName: `dashboard-snapshot-${config.name}`,
+      description: 'Forwards the daily snapshot event to the dashboard endpoint',
+      eventBus: bus,
+      eventPattern: { source: [EVENT_SOURCE], detailType: [EVENT_DETAIL_TYPE] },
+      targets: [
+        new eventsTargets.ApiDestination(destination, {
+          deadLetterQueue,
+          retryAttempts: 3,
+          maxEventAge: Duration.hours(1),
+        }),
+      ],
+    });
+
+    const schedule = new scheduler.Schedule(this, 'SnapshotSchedule', {
+      scheduleName: `dashboard-snapshot-${config.name}`,
       description: 'Daily portfolio snapshot after after-hours trading closes',
-      flexibleTimeWindow: { mode: 'OFF' },
-      // 5pm Pacific is the end of after-hours trading. Naming the zone rather than
-      // fixing a UTC offset keeps it correct across daylight saving transitions.
-      scheduleExpression: 'cron(0 17 ? * MON-FRI *)',
-      scheduleExpressionTimezone: 'America/Los_Angeles',
-      state: 'ENABLED',
-      target: {
-        arn: destination.attrArn,
-        roleArn: role.roleArn,
-        deadLetterConfig: { arn: deadLetterQueue.queueArn },
-        retryPolicy: { maximumRetryAttempts: 3, maximumEventAgeInSeconds: 3600 },
-      },
+      schedule: scheduler.ScheduleExpression.cron({
+        minute: '0',
+        hour: '17',
+        weekDay: 'MON-FRI',
+        timeZone: TimeZone.AMERICA_LOS_ANGELES,
+      }),
+      target: new schedulerTargets.EventBridgePutEvents(
+        {
+          eventBus: bus,
+          source: EVENT_SOURCE,
+          detailType: EVENT_DETAIL_TYPE,
+          detail: scheduler.ScheduleTargetInput.fromObject({ job: 'daily-snapshot' }),
+        },
+        { deadLetterQueue, retryAttempts: 3, maxEventAge: Duration.hours(1) },
+      ),
     });
 
-    new CfnOutput(this, 'ScheduleName', { value: schedule.name! });
+    new CfnOutput(this, 'ScheduleName', { value: schedule.scheduleName });
+    new CfnOutput(this, 'EventBusName', { value: bus.eventBusName });
     new CfnOutput(this, 'DeadLetterQueueUrl', { value: deadLetterQueue.queueUrl });
   }
 }
