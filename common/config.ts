@@ -75,10 +75,13 @@ const SHARED = {
   reserveArenaWorkerConcurrency: false,
 } as const;
 
-// Set once the Vercel project exists; until then the daily schedule is not created.
+// The daily schedule is created only where a URL is set. It must be the public
+// production domain: the team-scoped *-asaifuddin18s-projects.vercel.app domains sit
+// behind Vercel deployment protection, which EventBridge cannot authenticate through.
+// Dev stays null because preview deployments are protected the same way.
 const APP_URLS: Record<EnvironmentName, string | null> = {
   dev: null,
-  prod: null,
+  prod: 'https://investment-dashboard-theta-lyart.vercel.app',
 };
 
 const CONFIGS: Record<EnvironmentName, EnvironmentConfig> = {
