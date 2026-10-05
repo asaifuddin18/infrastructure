@@ -1,5 +1,7 @@
 import { Stack, StackProps, CfnOutput, Duration } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config';
 
@@ -22,6 +24,8 @@ export class SharedAccountStack extends Stack {
   public readonly vercelOidcProvider: iam.IOpenIdConnectProvider;
   public readonly vercelIssuerHost: string;
   public readonly vercelAudience: string;
+  /** Emails operational alarms from every project to the account owner. */
+  public readonly alertTopic: sns.ITopic;
 
   constructor(scope: Construct, id: string, props: SharedAccountStackProps) {
     super(scope, id, props);
@@ -50,6 +54,17 @@ export class SharedAccountStack extends Stack {
       config.createGithubOidcProvider,
       config,
     );
+
+    const alertTopic = new sns.Topic(this, 'AlertTopic', {
+      topicName: 'account-alerts',
+      displayName: 'AWS alerts',
+    });
+    alertTopic.addSubscription(new subscriptions.EmailSubscription(config.alertEmail));
+    this.alertTopic = alertTopic;
+    new CfnOutput(this, 'AlertTopicArn', {
+      value: alertTopic.topicArn,
+      description: 'Set as ALERT_TOPIC_ARN in the dashboard production environment',
+    });
 
     const deployRole = this.createGithubDeployRole(config, githubProvider);
     new CfnOutput(this, 'GithubDeployRoleArn', {

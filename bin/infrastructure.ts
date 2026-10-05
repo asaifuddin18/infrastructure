@@ -37,6 +37,7 @@ const vercelOidc = new VercelOidcStack(app, stackName('dashboard', 'vercel-oidc'
   oidcProvider: shared.vercelOidcProvider,
   issuerHost: shared.vercelIssuerHost,
   audience: shared.vercelAudience,
+  alertTopic: shared.alertTopic,
   description: 'IAM roles assumed by Vercel deployments via OIDC federation',
 });
 
@@ -46,6 +47,7 @@ const scheduleStack = config.appUrl
       config,
       data,
       appUrl: config.appUrl,
+      alertTopic: shared.alertTopic,
       description: 'Daily schedule invoking the dashboard snapshot endpoint',
     })
   : undefined;
@@ -60,6 +62,7 @@ const arenaCompute = new ArenaComputeStack(app, stackName('arena', 'compute', en
   env,
   config,
   data: arenaData,
+  alarmTopic: shared.alertTopic,
   description: 'Arena match ingestion: queue, starter and rate-limited worker',
 });
 

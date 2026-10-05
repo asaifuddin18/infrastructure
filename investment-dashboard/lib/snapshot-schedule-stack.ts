@@ -1,8 +1,11 @@
 import { Stack, StackProps, CfnOutput, Duration, TimeZone } from 'aws-cdk-lib';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as eventsTargets from 'aws-cdk-lib/aws-events-targets';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as schedulerTargets from 'aws-cdk-lib/aws-scheduler-targets';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../common/config';
@@ -13,6 +16,8 @@ export interface SnapshotScheduleStackProps extends StackProps {
   readonly data: DataStack;
   /** Public base URL of the deployed dashboard. */
   readonly appUrl: string;
+  /** Topic that emails the account owner when the daily snapshot fails. */
+  readonly alertTopic: sns.ITopic;
 }
 
 /** Source and detail type of the event the schedule emits and the rule forwards. */
@@ -93,6 +98,26 @@ export class SnapshotScheduleStack extends Stack {
         { deadLetterQueue, retryAttempts: 3, maxEventAge: Duration.hours(1) },
       ),
     });
+
+    // A message here means a snapshot failed every retry, and that day's report cannot be
+    // recreated later. The alarm stays in ALARM while the message remains, so purge the
+    // queue once handled or a later failure will not email again.
+    const failedSnapshots = new cloudwatch.Alarm(this, 'SnapshotDlqNotEmpty', {
+      alarmName: `dashboard-snapshot-dlq-${config.name}`,
+      alarmDescription:
+        'The daily dashboard snapshot failed after all retries. Inspect the event in ' +
+        `dashboard-snapshot-dlq-${config.name} and the Vercel logs for /api/cron/snapshot, ` +
+        'then purge the queue so the next failure alerts again.',
+      metric: deadLetterQueue.metricApproximateNumberOfMessagesVisible({
+        period: Duration.minutes(5),
+        statistic: 'Maximum',
+      }),
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    failedSnapshots.addAlarmAction(new cloudwatchActions.SnsAction(props.alertTopic));
 
     new CfnOutput(this, 'ScheduleName', { value: schedule.scheduleName });
     new CfnOutput(this, 'EventBusName', { value: bus.eventBusName });

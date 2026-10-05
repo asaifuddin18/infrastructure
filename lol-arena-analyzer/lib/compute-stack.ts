@@ -1,10 +1,12 @@
 import { Stack, StackProps, Duration, CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as path from 'node:path';
 import { Construct } from 'constructs';
@@ -14,6 +16,8 @@ import { ArenaDataStack } from './data-stack';
 export interface ArenaComputeStackProps extends StackProps {
   readonly config: EnvironmentConfig;
   readonly data: ArenaDataStack;
+  /** Topic the dead letter queue alarm emails. Without it the alarm only changes state. */
+  readonly alarmTopic?: sns.ITopic;
 }
 
 /**
@@ -186,7 +190,7 @@ export class ArenaComputeStack extends Stack {
      * are worth knowing about immediately, and queue depth is also the earliest signal of
      * abuse once the endpoint is public in M2.
      */
-    new cloudwatch.Alarm(this, 'DlqNotEmpty', {
+    const dlqAlarm = new cloudwatch.Alarm(this, 'DlqNotEmpty', {
       alarmName: `arena-match-fetch-dlq-${config.name}`,
       alarmDescription: 'Arena match ingestion sent a message to the dead letter queue',
       metric: deadLetterQueue.metricApproximateNumberOfMessagesVisible({
@@ -198,6 +202,9 @@ export class ArenaComputeStack extends Stack {
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
+    if (props.alarmTopic) {
+      dlqAlarm.addAlarmAction(new cloudwatchActions.SnsAction(props.alarmTopic));
+    }
 
     new CfnOutput(this, 'IngestStarterFunctionName', { value: this.ingestStarter.functionName });
     new CfnOutput(this, 'MatchQueueUrl', { value: this.matchQueue.queueUrl });

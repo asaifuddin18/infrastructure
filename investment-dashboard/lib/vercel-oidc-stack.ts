@@ -1,5 +1,6 @@
 import { Stack, StackProps, CfnOutput, Duration } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../../common/config';
 import { DataStack } from './data-stack';
@@ -10,6 +11,7 @@ export interface VercelOidcStackProps extends StackProps {
   readonly oidcProvider: iam.IOpenIdConnectProvider;
   readonly issuerHost: string;
   readonly audience: string;
+  readonly alertTopic: sns.ITopic;
 }
 
 /**
@@ -65,7 +67,7 @@ export class VercelOidcStack extends Stack {
 
     data.authTable.grantReadWriteData(role);
     data.dataTable.grantReadWriteData(role);
-    data.userSecretKey.grantEncryptDecrypt(role);
+    props.alertTopic.grantPublish(role);
     data.snaptradeCredentials.grantRead(role);
 
     return role;

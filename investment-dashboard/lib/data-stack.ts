@@ -27,13 +27,19 @@ export class DataStack extends Stack {
     const isProd = config.name === 'prod';
     const removalPolicy = isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY;
 
+    // Being retired: a SnapTrade personal API key has no per-user secrets to encrypt, and
+    // CloudTrail shows the key was never used. Removing a resource applies the deletion
+    // policy already deployed, so this deploy switches it to DESTROY and the next removes
+    // the key. exportValue keeps the cross-stack export alive until the Vercel stack has
+    // dropped its import; deleting both at once would fail the deploy.
     this.userSecretKey = new kms.Key(this, 'UserSecretKey', {
       alias: `alias/dashboard-user-secret-${config.name}`,
-      description: 'Envelope-encrypts per-user SnapTrade userSecret values stored in DynamoDB',
+      description: 'Retired: never used, scheduled for removal',
       enableKeyRotation: true,
-      removalPolicy,
+      removalPolicy: RemovalPolicy.DESTROY,
       pendingWindow: isProd ? Duration.days(30) : Duration.days(7),
     });
+    this.exportValue(this.userSecretKey.keyArn);
 
     this.authTable = new dynamodb.Table(this, 'AuthTable', {
       tableName: `dashboard-auth-${config.name}`,
@@ -72,7 +78,6 @@ export class DataStack extends Stack {
     new CfnOutput(this, 'CronSecretArn', { value: this.cronSecret.secretArn });
     new CfnOutput(this, 'AuthTableName', { value: this.authTable.tableName });
     new CfnOutput(this, 'DataTableName', { value: this.dataTable.tableName });
-    new CfnOutput(this, 'UserSecretKeyArn', { value: this.userSecretKey.keyArn });
     new CfnOutput(this, 'SnapTradeSecretArn', { value: this.snaptradeCredentials.secretArn });
   }
 }

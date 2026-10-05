@@ -45,6 +45,8 @@ export interface EnvironmentConfig {
    *   aws service-quotas get-service-quota --service-code lambda --quota-code L-B99A9384
    */
   readonly reserveArenaWorkerConcurrency: boolean;
+  /** Address that operational alarms across every project are emailed to. */
+  readonly alertEmail: string;
   /**
    * Public base URL of the deployed dashboard. The daily schedule is only created once
    * this is known, since it posts to the app's cron endpoint.
@@ -73,6 +75,7 @@ const SHARED = {
   // makes any reservation impossible. An increase to 1000 was requested on 2026-08-25;
   // turn this on once it is granted, and the worker starts draining its queue throttled.
   reserveArenaWorkerConcurrency: false,
+  alertEmail: 'asaifuddin18@gmail.com',
 } as const;
 
 // The daily schedule is created only where a URL is set. It must be the public
