@@ -80,10 +80,10 @@ The cost is a two-step release: bump and publish in
 
 | Stack | Scope | Contents |
 |---|---|---|
-| `common-account` | Account-wide, **not** per-env | Vercel + GitHub OIDC providers, CDK deploy role |
+| `common-account` | Account-wide, **not** per-env | Vercel + GitHub OIDC providers, CDK deploy role, `account-alerts` SNS topic |
 | `dashboard-data-<env>` | Per env | Auth table, data table, KMS key, SnapTrade secret |
 | `dashboard-vercel-oidc-<env>` | Per env | IAM roles for Vercel deployments |
-| `dashboard-snapshot-schedule-<env>` | Per env | Daily 5pm PT schedule invoking the app's snapshot endpoint |
+| `dashboard-snapshot-schedule-<env>` | Per env | Daily 5pm PT schedule invoking the app's snapshot endpoint, DLQ alarm |
 | `arena-data-<env>` | Per env | Arena single table and the raw match archive bucket |
 | `arena-compute-<env>` | Per env | Match fetch queue, DLQ, ingest starter and match worker |
 
@@ -148,6 +148,17 @@ aws iam list-open-id-connect-providers
 When importing, the existing provider's client ID list must contain the audience this
 repo needs (`sts.amazonaws.com` for GitHub). A provider missing the audience creates
 the role fine but fails at assume-role time.
+
+## Alerting
+
+`common-account` owns an `account-alerts` SNS topic that emails the address in
+`common/config.ts` (`alertEmail`). An email subscription does nothing until its
+confirmation link is clicked; check with `aws sns list-subscriptions-by-topic`.
+
+Every dead letter queue alarm should send to this topic — an alarm without an action
+only changes state in the console, which nobody sees. A DLQ alarm stays in ALARM while
+a message remains, so **purge the queue after handling a failure** or the next one will
+not email.
 
 ## Conventions
 
